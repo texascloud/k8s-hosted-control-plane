@@ -1,0 +1,20 @@
+# This file is used in conjunction with the apiserver flag "--endpoint-reconciler=none"
+# in order to allow us to override the "kubernetes" service in the "default" namespace
+# to be type ExternalName. This "trick", in addition to modifying the CoreDNS Pod's
+# environment variable "KUBERNETES_SERVICE_HOST" to match the below externalName,
+# allows CoreDNS to connect to an apiserver that is running in a completely different
+# network than the Node the CoreDNS Pod is running on.
+
+# NOTE: even though we are modifying several Pod's "KUBERNETES_SERVICE_HOST" env var,
+# it's technically only necessary to do it for the CoreDNS Pod since afterwards the
+# kubernetes Service will resolve to the externalName below... but that requires
+# CoreDNS to be up :) 
+---
+kind: "Service"
+apiVersion: "v1"
+metadata:
+  name: "kubernetes"
+spec:
+  clusterIP: ""
+  type: ExternalName
+  externalName: hcp.v2.platform9.beer

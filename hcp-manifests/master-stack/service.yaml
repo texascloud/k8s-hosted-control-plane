@@ -1,0 +1,19 @@
+# Create a VirtualService which routes traffic to this
+# Service based on SNI
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hcp
+  namespace: hcp
+spec:
+  ports:
+  - name: apiserver
+    port: 443
+    protocol: TCP
+    targetPort: 6443
+  selector:
+    cluster: testing
+  # TODO: maybe do something with this?
+  sessionAffinity: None
+  type: ClusterIP

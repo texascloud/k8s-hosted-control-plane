@@ -1,0 +1,14 @@
+# FIXME: Ambassador is not scalable. Replace this Mapping with a VirtualService
+# (Gloo CRD) once this issue is addressed:
+# https://github.com/solo-io/gloo/issues/2244
+---
+apiVersion: getambassador.io/v1
+kind: Mapping
+metadata:
+  name: hcp
+  namespace: testing
+spec:
+  # https://www.getambassador.io/reference/tls/origination
+  service: https://hcp.testing:6443
+  host: hcp.v2.platform9.beer
+  prefix: /

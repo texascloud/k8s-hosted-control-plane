@@ -1,0 +1,34 @@
+# This Job will create a TLS Secret in the current namespace that allows
+# SSL to be enabled for Ingress resources that want to route traffic to
+# the HCP apiserver
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    linkerd.io/inject: disabled
+  name: upload-certs-job
+  namespace: hcp
+# TODO: Add readiness probe, possibly also liveness?
+spec:
+  containers:
+  - image: rancher/k3s:v1.17.4+k3s1
+    name: upload-certs
+    command: ["/scripts/upload-k3s-serving-certs-to-hcp-namespace-as-secret.sh", "/etc/rancher/k3s/k3s.yaml"]
+    volumeMounts:
+    - name: generated-kubeconfig
+      mountPath: /etc/rancher/k3s
+    - name: scripts
+      mountPath: /scripts
+  # Has permissions to create a secret in the namespace of the management plane we're running in
+  serviceAccountName: "hcp"
+  restartPolicy: OnFailure
+  volumes:
+  - name: generated-kubeconfig
+    persistentVolumeClaim:
+      claimName: generated-kubeconfig
+  - name: scripts
+    configMap:
+      name: k3s-server-scripts
+      # GOTCHA: https://github.com/kubernetes/kubernetes/issues/71356
+      defaultMode: 0777

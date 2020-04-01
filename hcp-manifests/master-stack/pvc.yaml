@@ -1,0 +1,16 @@
+# This PVC is used to store the generated kubeconfig after the
+# k3s server starts so we can grab it from our Job which uploads
+# it as a Secret in the hcp namespace
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: generated-kubeconfig
+  namespace: hcp
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      # Does not need to be this big :P
+      storage: 1Gi

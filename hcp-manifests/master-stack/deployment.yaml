@@ -1,0 +1,165 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    linkerd.io/inject: enabled
+  name: k3s-server
+  namespace: hcp
+  labels:
+    cluster: testing
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      cluster: testing
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        cluster: testing
+    # TODO: Add readiness probe, possibly also liveness?
+    spec:
+      containers:
+      - image: rancher/k3s:v1.17.4+k3s1
+        name: k3s
+        args:
+        - "server"
+        ########## k3s-specific flags ##########
+        # TODO: figure out if below cluster-cidr, service-cidr, and cluster-dns are
+        # required when running multiple HCP in a cluster... shouldn't be but dunno!
+        #- "--cluster-cidr"
+        #- "10.11.0.0/12"
+
+        #- "--service-cidr"
+        #- "10.10.0.0/12"
+
+        #- "--cluster-dns"
+        #- "10.10.0.10"
+
+        # Adds an entry under "/ETCD_PREFIX/bootstrap/<some_number>" with cert info which allows
+        # multiple replicas of this k3s server to run without stepping on each others toes.
+        # Enables HA "multi-master" :) that's cuz we're using an external etcd, but pointing
+        # our apiserver to an etcd proxy Service running inside the cluster which points to
+        # an externally running etcd
+        - "--datastore-endpoint"
+        - "http://etcd-$(ETCD_PREFIX).etcdproxy.svc.cluster.local:2379"
+
+        # Env var isn't working directly?
+        - "--token"
+        - "$(K3S_TOKEN)"
+
+        - "--agent-token"
+        - "$(K3S_TOKEN)"
+
+        # FIXME: Should prevent TLS handshake errors seen in k3s server logs by setting node IP to the Pod IP
+        - "--node-ip"
+        - "$(POD_IP)"
+
+        # Means "do not start kubelet or containerd, and no flannel either"
+        - "--disable-agent"
+
+        # Don't start IoT-suitable nodeport loadbalancer, and don't use traefik ingress by default
+        - "--no-deploy"
+        - "servicelb"
+
+        - "--no-deploy"
+        - "traefik"
+
+        # Allows the workers to connect while specifying K3S SERVER as a nodeport svc
+        # TODO: remove this when not doing development. This is the public IP of a server
+        # I was testing against, and only for NodePort, which should not be the ultimate goal
+        - "--tls-san"
+        - "172.107.176.28"
+
+        - "--tls-san"
+        - "127.0.0.1"
+
+        # TODO: It's important to set the below value to whatever full SNI you plan
+        # to have route to this Deployment.
+        # FIXME: template this out once this is a helm chart
+        - "--tls-san"
+        - "hcp.v2.platform9.beer"
+
+        ########## k8s-specific flags ##########
+        # Allows us to override the default kubernetes service to point to an FQDN
+        # THIS IS SUPER CRITICAL -- DO NOT REMOVE!!!
+        - "--kube-apiserver-arg"
+        - "endpoint-reconciler-type=none"
+
+        # Needed to ensure Pods which use client-go for reaching kubernetes Service can do so after our modification(*)
+        # (*) We override the Kubernetes Service in default namespace with one that is of type ExternalName, which client-go doesn't like
+        - "--kube-apiserver-arg"
+        - "enable-admission-plugins=PodPreset"
+
+        - "--kube-apiserver-arg"
+        - "runtime-config=settings.k8s.io/v1alpha1=true"
+
+        # FIXME: Enable all the below TLS/cert related flags once this repo supports generating
+        # client certs to be used by this deployment for communicating with it. For now it's fine,
+        # but in a real production deployment cluster with multiple HCPs, it'd be important to have.
+        # https://github.com/texascloud/etcdproxy-controller
+        # Certs to talk to external etcd cluster at a specified prefix (tenant)
+        #- "--kube-apiserver-arg"
+        #- "etcd-cafile=/etc/etcd/ca/serving-ca.crt"
+
+        #- "--kube-apiserver-arg"
+        #- "etcd-certfile=/etc/etcd/tls/tls.crt"
+
+        #- "--kube-apiserver-arg"
+        #- "etcd-keyfile=/etc/etcd/tls/tls.key"
+
+        # TODO: Can we have this in-cluster DNS resolve without specifying "svc.cluster.local"?
+        # This points to svc DNS of an etcd proxy
+        - "--kube-apiserver-arg"
+        - "etcd-servers=http://etcd-$(ETCD_PREFIX).etcdproxy.svc.cluster.local:2379"
+
+        env:
+        - name: K3S_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: k3s-token
+              key: k3s-token
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        # The below corresponds to the name of an EtcdProxy CR handled by this controller:
+        # https://github.com/texascloud/etcdproxy-controller
+        # That controller is kube-builder based, so it should be easy to deploy.
+        # I've chosen to create the etcdproxy Deployments in a namespace
+        # called "etcdproxy", so if you choose to use a different namespace,
+        # then update the values in this file which point to that Service
+        # TODO; Have this env var be set by a PodPreset which the EtcdProxy
+        # controller should create when an EtcdProxy CR is created. PRs welcome! :)
+        - name: ETCD_PREFIX
+          value: "mallcop"
+        volumeMounts:
+        - name: etcd-client-cert
+          mountPath: /etc/etcd/tls
+        - name: etcd-serving-ca
+          mountPath: /etc/etcd/ca
+        - name: manifests
+          mountPath: /var/lib/rancher/k3s/server/manifests/from-mp-configmap
+        - name: generated-kubeconfig
+          mountPath: /etc/rancher/k3s
+      # Has permissions to create a secret in the namespace of the management plane we're running in
+      serviceAccountName: "hcp"
+      volumes:
+      - name: generated-kubeconfig
+        persistentVolumeClaim:
+          claimName: generated-kubeconfig
+      # FIXME; Uncomment these once creating an EtcdProxy CR creates these as Secrets for us
+      # - name: etcd-client-cert
+      #   secret:
+      #     secretName: blart-etcd-client-cert
+      # - name: etcd-serving-ca
+      #   configMap:
+      #     name: blart-etcd-serving-ca
+      - name: manifests
+        configMap:
+          name: k3s-server-manifests
